@@ -7,7 +7,7 @@ description = "Application and library that updates JetBrains Toolbox IDE's on d
 readme = "README.md"
 repository = "https://github.com/GideonBear/jetbrains-toolbox-updater"
 license-file = "LICENSE"
-keywords = ["jetbrains", "toolbox", "jetbrains-toolbox", "jetbrains_toolbox", "update", "updater", "updating"]
+keywords = ["jetbrains", "toolbox", "update"]
 categories = ["command-line-utilities"]
 
 [dependencies]
