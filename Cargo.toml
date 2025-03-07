@@ -2,5 +2,12 @@
 name = "jetbrains-toolbox-updater"
 version = "0.1.0"
 edition = "2024"
+authors = ["GideonBear"]
+description = "Application and library that updates JetBrains Toolbox IDE's on demand using some trickery"
+readme = "README.md"
+repository = "https://github.com/GideonBear/jetbrains-toolbox-updater"
+license-file = "LICENSE"
+keywords = ["jetbrains", "toolbox", "jetbrains-toolbox", "jetbrains_toolbox", "update", "updater", "updating"]
+categories = ["command-line-utilities"]
 
 [dependencies]
