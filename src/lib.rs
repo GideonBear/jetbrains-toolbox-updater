@@ -104,17 +104,17 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
 }
 
 #[cfg(target_os = "windows")]
-fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
+pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
     Err(FindError::UnsupportedOS("Windows".to_string())) // TODO
 }
 
 #[cfg(target_os = "macos")]
-fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
+pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
     Err(FindError::UnsupportedOS("MacOS".to_string())) // TODO
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-fn find_jetbrains_toolbox() -> Result<Installation, FindError> {
+pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
     // JetBrains Toolbox is not supported on mobile or BSD
     Err(FindError::UnsupportedOS(std::env::consts::OS.to_string()))
 }
