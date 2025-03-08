@@ -11,3 +11,6 @@ keywords = ["jetbrains", "toolbox", "update"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+dirs = "6.0.0"
+json = "0.12.4"
+sysinfo = "0.33.1"
