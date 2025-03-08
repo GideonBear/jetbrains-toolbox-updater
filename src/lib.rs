@@ -69,7 +69,7 @@ pub enum FindError {
     NotFound,
     InvalidInstallation,
     NoHomeDir,
-    UnsupportedOS,
+    UnsupportedOS(String),
 }
 
 #[cfg(target_os = "linux")]
@@ -105,18 +105,18 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
 
 #[cfg(target_os = "windows")]
 fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
-    FindError::UnsupportedOS // TODO
+    FindError::UnsupportedOS("Windows") // TODO
 }
 
 #[cfg(target_os = "macos")]
 fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
-    FindError::UnsupportedOS // TODO
+    FindError::UnsupportedOS("MacOS") // TODO
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn find_jetbrains_toolbox() -> Result<Installation, FindError> {
     // JetBrains Toolbox is not supported on mobile or BSD
-    FindError::UnsupportedOS
+    FindError::UnsupportedOS(std::env::OS)
 }
 
 fn kill_all() -> Result<bool, UpdateError> {
