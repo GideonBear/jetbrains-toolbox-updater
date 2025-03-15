@@ -122,7 +122,7 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
 fn kill_all() -> Result<bool, UpdateError> {
     let mut sys = System::new_all();
     sys.refresh_all();
-    // TODO: this might not work on other platforms
+    // TODO: this might not work on other platforms; look at this when adding support for Windows/MacOS
     let processes = sys
         .processes()
         .values()
