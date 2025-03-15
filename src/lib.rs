@@ -146,7 +146,6 @@ fn kill_all() -> Result<bool, UpdateError> {
     Ok(match processes.len() {
         0 => false,
         _ => {
-            println!("Found {} processes", processes.len());
             for process in processes {
                 process.kill();
                 process.wait();
