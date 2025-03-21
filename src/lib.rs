@@ -170,26 +170,26 @@ pub fn update_jetbrains_toolbox(
     let toolbox_was_open = kill_all()?;
 
     // Modify the configuration to enable automatic updates
-    let mut skipped_channels = vec![];
-    installation.update_all_channels(|channel, d| {
-        if !d.has_key("channel") {
-            return Err(UpdateError::InvalidChannel);
-        }
-        if d["channel"].has_key("autoUpdate") {
-            if d["channel"]["autoUpdate"] == true {
-                // This channel is already auto-updating, we won't touch the configuration in this case
-                skipped_channels.push(channel.clone());
-                return Ok(());
-            } else {
-                // We expect autoUpdate to be missing if it's false
-                return Err(UpdateError::InvalidChannel);
-            }
-        }
+    let skipped_channels = change_config(&installation)?;
 
-        d["channel"]["autoUpdate"] = true.into();
-        Ok(())
-    })?;
+    if let Err(e) = actual_update(&installation) {
+        println!("Unexpected error encountered, resetting configuration to previous state");
+        reset_config(&installation, skipped_channels)?;
+        return Err(e);
+    }
 
+    // Reset the configuration
+    reset_config(&installation, skipped_channels)?;
+
+    // Restart the app if it was open
+    if toolbox_was_open {
+        installation.start_minimized().map_err(UpdateError::Io)?;
+    }
+
+    Ok(())
+}
+
+fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), UpdateError> {
     // Start the app in the background
     installation.start_minimized().map_err(UpdateError::Io)?;
 
@@ -258,8 +258,34 @@ pub fn update_jetbrains_toolbox(
         // We expect it to be running.
         return Err(UpdateError::PrematureExit);
     }
+    
+    Ok(())
+}
 
-    // Reset the configuration
+fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<PathBuf>, UpdateError> {
+    let mut skipped_channels = vec![];
+    installation.update_all_channels(|channel, d| {
+        if !d.has_key("channel") {
+            return Err(UpdateError::InvalidChannel);
+        }
+        if d["channel"].has_key("autoUpdate") {
+            if d["channel"]["autoUpdate"] == true {
+                // This channel is already auto-updating, we won't touch the configuration in this case
+                skipped_channels.push(channel.clone());
+                return Ok(());
+            } else {
+                // We expect autoUpdate to be missing if it's false
+                return Err(UpdateError::InvalidChannel);
+            }
+        }
+
+        d["channel"]["autoUpdate"] = true.into();
+        Ok(())
+    })?;
+    Ok(skipped_channels)
+}
+
+fn reset_config(installation: &JetBrainsToolboxInstallation, skipped_channels: Vec<PathBuf>) -> Result<(), UpdateError> {
     installation.update_all_channels(|channel, d| {
         if !d.has_key("channel") {
             return Err(UpdateError::InvalidChannel);
@@ -271,11 +297,5 @@ pub fn update_jetbrains_toolbox(
         d["channel"].remove("autoUpdate");
         Ok(())
     })?;
-
-    // Restart the app if it was open
-    if toolbox_was_open {
-        installation.start_minimized().map_err(UpdateError::Io)?;
-    }
-
     Ok(())
 }
