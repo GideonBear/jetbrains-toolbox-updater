@@ -120,7 +120,8 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
     Err(FindError::UnsupportedOS(std::env::consts::OS.to_string()))
 }
 
-fn kill_all() -> Result<bool, UpdateError> { // Returns if it was open
+// Returns if it was open
+fn kill_all() -> Result<bool, UpdateError> {
     let mut sys = System::new_all();
     sys.refresh_all();
     // TODO: this might not work on other platforms; look at this when adding support for Windows/MacOS
@@ -258,7 +259,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), Upda
         // We expect it to be running.
         return Err(UpdateError::PrematureExit);
     }
-    
+
     Ok(())
 }
 
@@ -285,7 +286,10 @@ fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<Path
     Ok(skipped_channels)
 }
 
-fn reset_config(installation: &JetBrainsToolboxInstallation, skipped_channels: Vec<PathBuf>) -> Result<(), UpdateError> {
+fn reset_config(
+    installation: &JetBrainsToolboxInstallation,
+    skipped_channels: Vec<PathBuf>,
+) -> Result<(), UpdateError> {
     installation.update_all_channels(|channel, d| {
         if !d.has_key("channel") {
             return Err(UpdateError::InvalidChannel);
