@@ -31,6 +31,12 @@ impl From<io::Error> for UpdateError {
     }
 }
 
+impl From<JsonError> for UpdateError {
+    fn from(err: JsonError) -> UpdateError {
+        UpdateError::Json(err)
+    }
+}
+
 impl JetBrainsToolboxInstallation {
     fn update_all_channels<F>(&self, mut operation: F) -> Result<(), UpdateError>
     where
@@ -50,7 +56,7 @@ impl JetBrainsToolboxInstallation {
         let mut file = File::options().read(true).write(true).open(&path)?;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
-        let mut data = json::parse(&buf).map_err(UpdateError::Json)?;
+        let mut data = json::parse(&buf)?;
         operation(&path, &mut data)?;
         // Seek to the start, dump, then truncate, to avoid re-opening the file
         file.seek(SeekFrom::Start(0))?; // Seek
