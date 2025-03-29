@@ -25,13 +25,19 @@ pub enum UpdateError {
     PrematureExit,
 }
 
+impl From<io::Error> for UpdateError {
+    fn from(err: io::Error) -> UpdateError {
+        UpdateError::Io(err)
+    }
+}
+
 impl JetBrainsToolboxInstallation {
     fn update_all_channels<F>(&self, mut operation: F) -> Result<(), UpdateError>
     where
         F: FnMut(&PathBuf, &mut JsonValue) -> Result<(), UpdateError>,
     {
-        for file in fs::read_dir(&self.channels).map_err(UpdateError::Io)? {
-            let file = file.map_err(UpdateError::Io)?;
+        for file in fs::read_dir(&self.channels)? {
+            let file = file?;
             self.update_channel(file.path(), &mut operation)?;
         }
         Ok(())
@@ -41,21 +47,17 @@ impl JetBrainsToolboxInstallation {
     where
         F: FnMut(&PathBuf, &mut JsonValue) -> Result<(), UpdateError>,
     {
-        let mut file = File::options()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(UpdateError::Io)?;
+        let mut file = File::options().read(true).write(true).open(&path)?;
         let mut buf = String::new();
-        file.read_to_string(&mut buf).map_err(UpdateError::Io)?;
+        file.read_to_string(&mut buf)?;
         let mut data = json::parse(&buf).map_err(UpdateError::Json)?;
         operation(&path, &mut data)?;
         // Seek to the start, dump, then truncate, to avoid re-opening the file
-        file.seek(SeekFrom::Start(0)).map_err(UpdateError::Io)?; // Seek
+        file.seek(SeekFrom::Start(0))?; // Seek
         buf = data.dump();
-        file.write_all(buf.as_bytes()).map_err(UpdateError::Io)?; // Dump
-        let current_position = file.stream_position().map_err(UpdateError::Io)?;
-        file.set_len(current_position).map_err(UpdateError::Io)?; // Truncate
+        file.write_all(buf.as_bytes())?; // Dump
+        let current_position = file.stream_position()?;
+        file.set_len(current_position)?; // Truncate
 
         Ok(())
     }
@@ -184,7 +186,7 @@ pub fn update_jetbrains_toolbox(
 
     // Restart the app if it was open
     if toolbox_was_open {
-        installation.start_minimized().map_err(UpdateError::Io)?;
+        installation.start_minimized()?;
     }
 
     Ok(())
@@ -192,16 +194,16 @@ pub fn update_jetbrains_toolbox(
 
 fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), UpdateError> {
     // Start the app in the background
-    installation.start_minimized().map_err(UpdateError::Io)?;
+    installation.start_minimized()?;
 
     // Monitor the logs for possible updates, and wait until they're complete
     let mut updates: u32 = 0;
     let mut correct_checksums_expected: u32 = 0;
     let start_time = Instant::now();
 
-    let file = File::open(&installation.log).map_err(UpdateError::Io)?;
+    let file = File::open(&installation.log)?;
     let mut file = BufReader::new(file);
-    file.seek(SeekFrom::End(0)).map_err(UpdateError::Io)?;
+    file.seek(SeekFrom::End(0))?;
     loop {
         // TODO: Unfortunately there is no log message indicating there are no updates; so waiting is necessary it looks like.
         //  Unless we can do something with "Downloaded fus-assistant.xml"? Maybe shorten the time to 1 or 2 seconds after that message, seems to be fine.
@@ -210,17 +212,16 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), Upda
             break;
         }
 
-        let curr_position = file.stream_position().map_err(UpdateError::Io)?;
+        let curr_position = file.stream_position()?;
 
         // Read a line
         let mut line = String::new();
-        file.read_line(&mut line).map_err(UpdateError::Io)?;
+        file.read_line(&mut line)?;
 
         if line.is_empty() {
             // There is no new full line, so seek back to before the (possibly partial) line was read,
             //   and sleep for a bit.
-            file.seek(SeekFrom::Start(curr_position))
-                .map_err(UpdateError::Io)?;
+            file.seek(SeekFrom::Start(curr_position))?;
             sleep(Duration::from_millis(100));
         } else {
             // Each update consists of first downloading, then checking the checksum, then a lot of other things.
