@@ -10,6 +10,10 @@ jetbrains-toolbox-updater is included as part of [topgrade](https://github.com/t
 ```bash
 cargo install jetbrains-toolbox-updater
 ```
+And used by running:
+```bash
+jetbrains-toolbox-updater
+```
 
 ## How it works
 The process is as follows:
