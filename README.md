@@ -1,7 +1,8 @@
 
 # jetbrains-toolbox-updater
 
-Application and library that updates [JetBrains Toolbox](https://www.jetbrains.com/toolbox-app/) IDE's on demand using some trickery
+Application and library that updates [JetBrains Toolbox](https://www.jetbrains.com/toolbox-app/) IDE's on demand using some trickery.
+It currently supports Linux only, but Windows support is planned.
 ## Installation
 
 jetbrains-toolbox-updater is included as part of [topgrade](https://github.com/topgrade-rs/topgrade), but it can also be installed seperately using cargo:
