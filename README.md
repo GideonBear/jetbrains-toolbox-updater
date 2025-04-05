@@ -1,7 +1,7 @@
 
 # jetbrains-toolbox-updater
 
-Application and library that updates [JetBrains Toolbox](https://www.jetbrains.com/toolbox-app/) IDE's on demand using some trickery.
+CLI and library that updates [JetBrains Toolbox](https://www.jetbrains.com/toolbox-app/) IDE's on demand using some trickery.
 It currently supports Linux only, but Windows support is planned.
 ## Installation
 
