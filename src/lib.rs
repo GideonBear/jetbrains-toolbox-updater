@@ -173,7 +173,9 @@ fn kill_all() -> Result<bool, UpdateError> {
     })
 }
 
-pub fn update_jetbrains_toolbox(installation: JetBrainsToolboxInstallation) -> Result<(), UpdateError> {
+pub fn update_jetbrains_toolbox(
+    installation: JetBrainsToolboxInstallation,
+) -> Result<(), UpdateError> {
     _update_jetbrains_toolbox::<false>(installation)
 }
 
