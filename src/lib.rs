@@ -173,7 +173,11 @@ fn kill_all() -> Result<bool, UpdateError> {
     })
 }
 
-pub fn update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
+pub fn update_jetbrains_toolbox(installation: JetBrainsToolboxInstallation) -> Result<(), UpdateError> {
+    _update_jetbrains_toolbox::<false>(installation)
+}
+
+fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     installation: JetBrainsToolboxInstallation,
 ) -> Result<(), UpdateError> {
     // Close the app if it's open
@@ -210,7 +214,7 @@ pub fn update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
             return Err(UpdateError::DoubleToolboxSelfUpdate);
         }
 
-        update_jetbrains_toolbox::<true>(installation)
+        _update_jetbrains_toolbox::<true>(installation)
     } else {
         Ok(())
     }
