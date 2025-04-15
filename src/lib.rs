@@ -23,6 +23,7 @@ pub enum UpdateError {
     InvalidChannel,
     CouldNotTerminate(String),
     PrematureExit,
+    DoubleToolboxSelfUpdate,
 }
 
 impl From<io::Error> for UpdateError {
@@ -172,7 +173,7 @@ fn kill_all() -> Result<bool, UpdateError> {
     })
 }
 
-pub fn update_jetbrains_toolbox(
+pub fn update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     installation: JetBrainsToolboxInstallation,
 ) -> Result<(), UpdateError> {
     // Close the app if it's open
@@ -181,11 +182,14 @@ pub fn update_jetbrains_toolbox(
     // Modify the configuration to enable automatic updates
     let skipped_channels = change_config(&installation)?;
 
-    if let Err(e) = actual_update(&installation) {
-        println!("Unexpected error encountered, resetting configuration to previous state");
-        reset_config(&installation, skipped_channels)?;
-        return Err(e);
-    }
+    let redo = match actual_update(&installation) {
+        Err(e) => {
+            println!("Unexpected error encountered, resetting configuration to previous state");
+            reset_config(&installation, skipped_channels)?;
+            return Err(e);
+        }
+        Ok(redo) => redo,
+    };
 
     // Reset the configuration
     reset_config(&installation, skipped_channels)?;
@@ -195,10 +199,27 @@ pub fn update_jetbrains_toolbox(
         installation.start_minimized()?;
     }
 
-    Ok(())
+    if redo {
+        // We want to redo. We reset the configuration and re-opened Toolbox
+        //  (technically not needed, but this makes the process a bit simpler)
+        //  So now we just want to redo the entire process.
+        //  We do this by calling this function recursively.
+
+        if IS_RECURSIVE {
+            // Except if this was already recursive, then there must be something very wrong.
+            return Err(UpdateError::DoubleToolboxSelfUpdate);
+        }
+
+        update_jetbrains_toolbox::<true>(installation)
+    } else {
+        Ok(())
+    }
 }
 
-fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), UpdateError> {
+/// Returns redo
+fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, UpdateError> {
+    let mut redo = false;
+
     // Start the app in the background
     installation.start_minimized()?;
 
@@ -257,6 +278,15 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), Upda
                 } else {
                     println!("Update finished, waiting for other update(s) to finish")
                 }
+            } else if line.contains(
+                "Shutting down. Reason: The updated app is starting, closing the current process",
+            ) {
+                // Toolbox (self-)update finished. This does say "Downloading from" when starting.
+                // But since it restarted itself the state is messed up. We want to re-do the entire process once now.
+                redo = true;
+                println!("Toolbox (self-)update finished.");
+                sleep(Duration::from_secs(2)); // Letting it finish up
+                break;
             }
         }
     }
@@ -267,7 +297,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<(), Upda
         return Err(UpdateError::PrematureExit);
     }
 
-    Ok(())
+    Ok(redo)
 }
 
 fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<PathBuf>, UpdateError> {
