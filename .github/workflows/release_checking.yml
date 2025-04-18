@@ -1,0 +1,23 @@
+name: Release checking
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+  CARGO_TERM_VERBOSE: 'true'
+
+jobs:
+  # Not really "pre-publish" at this point but better late than never
+  pre-publish-check:
+    name: Do pre-publish checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v2
