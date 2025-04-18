@@ -106,7 +106,7 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
     if !logs_dir.is_dir() {
         return Err(FindError::InvalidInstallation);
     }
-    let log = logs_dir.join("toolbox.log"); // The log itself might not exist yet, so we don't check for it here
+    let log = logs_dir.join("toolbox.latest.log"); // The log itself might not exist yet, so we don't check for it here
 
     Ok(JetBrainsToolboxInstallation {
         binary,
