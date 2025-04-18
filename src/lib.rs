@@ -25,6 +25,8 @@ pub enum UpdateError {
     CouldNotTerminate(String),
     PrematureExit,
     DoubleToolboxSelfUpdate,
+    StartupFusAssistantTimeout,
+    DoubleStartupFusAssistant,
 }
 
 impl From<io::Error> for UpdateError {
@@ -235,16 +237,24 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
     let mut updates: u32 = 0;
     let mut correct_checksums_expected: u32 = 0;
     let start_time = Instant::now();
+    let mut startup_time = None;
 
     let file = File::open(&installation.log)?;
     let mut file = BufReader::new(file);
     file.seek(SeekFrom::End(0))?;
     loop {
-        // TODO: Unfortunately there is no log message indicating there are no updates; so waiting is necessary it looks like.
-        //  Unless we can do something with "Downloaded fus-assistant.xml"? Maybe shorten the time to 1 or 2 seconds after that message, seems to be fine.
-        if updates == 0 && start_time + Duration::from_secs(10) < Instant::now() {
-            println!("No updates found.");
-            break;
+        // If 60 seconds pass without the startup event happening, something's wrong.
+        //  Even if there are updates found.
+        if startup_time.is_none() && start_time + Duration::from_secs(60) < Instant::now() {
+            return Err(UpdateError::StartupFusAssistantTimeout);
+        }
+
+        if let Some(startup_time) = startup_time {
+            // If 10 seconds pass from startup, we assume there are no updates
+            if updates == 0 && startup_time + Duration::from_secs(10) < Instant::now() {
+                println!("No updates found.");
+                break;
+            }
         }
 
         let curr_position = file.stream_position()?;
@@ -295,6 +305,12 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 println!("Toolbox (self-)update finished.");
                 sleep(Duration::from_secs(2)); // Letting it finish up
                 break;
+            } else if line.contains("Downloaded fus-assistant.xml") {
+                if startup_time.is_some() {
+                    // We expect to get it once
+                    return Err(UpdateError::DoubleStartupFusAssistant);
+                }
+                startup_time = Some(Instant::now())
             }
         }
     }
