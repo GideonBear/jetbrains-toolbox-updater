@@ -17,6 +17,7 @@ pub struct JetBrainsToolboxInstallation {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum UpdateError {
     Io(io::Error),
     Json(JsonError),
@@ -75,6 +76,7 @@ impl JetBrainsToolboxInstallation {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FindError {
     NotFound,
     InvalidInstallation,
