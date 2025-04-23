@@ -303,7 +303,10 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 // But since it restarted itself the state is messed up. We want to re-do the entire process once now.
                 redo = true;
                 println!("Toolbox (self-)update finished.");
-                sleep(Duration::from_secs(2)); // Letting it finish up
+                // Letting it finish up. In this time, it will restart itself.
+                //  We could theoretically wait for the restart, but that is less necessary, since
+                //  self-updates are not very common compared to IDE updates.
+                sleep(Duration::from_secs(10));
                 break;
             } else if line.contains("Downloaded fus-assistant.xml") {
                 if startup_time.is_some() {
