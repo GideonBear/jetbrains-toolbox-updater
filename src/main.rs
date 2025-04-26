@@ -1,3 +1,5 @@
+// TODO: CLI is blocked by https://github.com/rust-lang/cargo/issues/1982
+
 // use clap::Parser;
 use jetbrains_toolbox_updater::{find_jetbrains_toolbox, update_jetbrains_toolbox};
 
