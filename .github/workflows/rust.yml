@@ -23,5 +23,7 @@ jobs:
         run: cargo build --verbose
       - name: Lint (cargo clippy)
         run: cargo clippy --verbose --all-features -- -D warnings
+      - name: Lint tests (cargo clippy)
+        run: cargo clippy --verbose --all-features --tests -- -D warnings
       - name: Run tests (cargo test)
         run: cargo test --verbose
