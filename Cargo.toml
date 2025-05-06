@@ -14,7 +14,7 @@ categories = ["command-line-utilities"]
 #clap = { version = "4.5.37", features = ["derive"], optional = true }
 dirs = "6.0.0"
 json = "0.12.4"
-sysinfo = "0.34.2"
+sysinfo = "0.35.0"
 
 #[build-dependencies]
 #built = { version = "0.7.7"}
