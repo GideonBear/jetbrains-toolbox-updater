@@ -311,7 +311,9 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 // Toolbox (self-)update finished. This does say "Downloading from" when starting.
                 // But since it restarted itself the state is messed up. We want to re-do the entire process once now.
                 redo = true;
-                println!("Toolbox (self-)update finished, update process will restart in 10 seconds");
+                println!(
+                    "Toolbox (self-)update finished, update process will restart in 10 seconds"
+                );
                 // Letting it finish up. In this time, it will restart itself.
                 //  We could theoretically wait for the restart, but that is less necessary, since
                 //  self-updates are not very common compared to IDE updates.
