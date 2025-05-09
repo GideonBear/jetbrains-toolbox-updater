@@ -89,6 +89,7 @@ pub enum FindError {
 #[cfg(target_os = "linux")]
 pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
     let home_dir = home_dir().ok_or(FindError::NoHomeDir)?;
+    // TODO: allow custom dir
     let dir = home_dir.join(".local/share/JetBrains/Toolbox");
     if !dir.exists() {
         return Err(FindError::NotFound);
