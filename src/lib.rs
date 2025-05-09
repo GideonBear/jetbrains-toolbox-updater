@@ -271,10 +271,12 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
 
         if line.is_empty() {
             // There is no new full line, so seek back to before the (possibly partial) line was read,
-            //   and sleep for a bit.
+            //  and sleep for a bit.
             file.seek(SeekFrom::Start(curr_position))?;
             sleep(Duration::from_millis(100));
         } else {
+            // TODO: Maybe just remove the downloading/checking checksum logic entirely,
+            //  and assume we always download the update?
             // Each update consists of first downloading, then checking the checksum, then a lot of other things.
             //  If the download is already there, it won't say "Downloading from", it will skip that
             //  and immediately say "Correct checksum for".
@@ -313,6 +315,8 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 // Letting it finish up. In this time, it will restart itself.
                 //  We could theoretically wait for the restart, but that is less necessary, since
                 //  self-updates are not very common compared to IDE updates.
+                //  It is also (probably?) not necessary to wait for the restart to fully complete,
+                //  we just want it to have finished any update-related shutdown or startup tasks.
                 sleep(Duration::from_secs(10));
                 break;
             } else if line.contains("Downloaded fus-assistant.xml") {
