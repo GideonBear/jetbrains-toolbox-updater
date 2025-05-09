@@ -190,6 +190,7 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     installation: JetBrainsToolboxInstallation,
 ) -> Result<(), UpdateError> {
     // Close the app if it's open
+    println!("Killing Toolbox");
     let toolbox_was_open = kill_all()?;
 
     // Modify the configuration to enable automatic updates
@@ -209,6 +210,7 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
 
     // Restart the app if it was open
     if toolbox_was_open {
+        println!("Re-opening Toolbox");
         installation.start_minimized()?;
     }
 
@@ -234,6 +236,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
     let mut redo = false;
 
     // Start the app in the background
+    println!("Starting Toolbox");
     installation.start_minimized()?;
 
     // Monitor the logs for possible updates, and wait until they're complete
@@ -255,7 +258,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
         if let Some(startup_time) = startup_time {
             // If 10 seconds pass from startup, we assume there are no updates
             if updates == 0 && startup_time + Duration::from_secs(10) < Instant::now() {
-                println!("No updates found.");
+                println!("No updates found");
                 break;
             }
         }
@@ -279,11 +282,12 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
             //  should not be considered as the start of a separate update.
             if line.contains("Correct checksum for") || line.contains("Downloading from") {
                 if line.contains("Correct checksum for") && correct_checksums_expected > 0 {
+                    println!("Verified a checksum for an update that was started earlier");
                     correct_checksums_expected -= 1;
                     continue;
                 }
                 // Update started
-                println!("Found an update, waiting until it finishes...");
+                println!("Found an update, waiting until it finishes");
                 updates += 1;
                 if line.contains("Downloading from") {
                     // We expect "Correct checksum for" to be broadcast exactly once after the "Downloading from".
@@ -293,7 +297,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 // Update finished
                 updates -= 1;
                 if updates == 0 {
-                    println!("Update finished, exiting...");
+                    println!("All updates finished, exiting in 2 seconds");
                     sleep(Duration::from_secs(2)); // Letting it finish up
                     break;
                 } else {
@@ -305,7 +309,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 // Toolbox (self-)update finished. This does say "Downloading from" when starting.
                 // But since it restarted itself the state is messed up. We want to re-do the entire process once now.
                 redo = true;
-                println!("Toolbox (self-)update finished.");
+                println!("Toolbox (self-)update finished, update process will restart in 10 seconds");
                 // Letting it finish up. In this time, it will restart itself.
                 //  We could theoretically wait for the restart, but that is less necessary, since
                 //  self-updates are not very common compared to IDE updates.
@@ -316,12 +320,14 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                     // We expect to get it once
                     return Err(UpdateError::DoubleStartupFusAssistant);
                 }
+                println!("Toolbox started");
                 startup_time = Some(Instant::now())
             }
         }
     }
 
     // Quit the app
+    println!("Killing Toolbox");
     if !kill_all()? {
         // We expect it to be running.
         return Err(UpdateError::PrematureExit);
