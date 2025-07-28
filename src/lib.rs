@@ -2,7 +2,7 @@ use dirs::home_dir;
 use json::{JsonError, JsonValue};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -84,22 +84,29 @@ pub enum FindError {
     InvalidInstallation,
     NoHomeDir,
     UnsupportedOS(String),
+    NoDesktopFile(String),
+    DesktopFileMissingExec,
+    MultipleMismatchingDesktopFiles(String),
 }
 
 #[cfg(target_os = "linux")]
 pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindError> {
     let home_dir = home_dir().ok_or(FindError::NoHomeDir)?;
     // TODO: allow custom dir
-    let dir = home_dir.join(".local/share/JetBrains/Toolbox");
+    let local_share = home_dir.join(".local/share");
+    let dir = local_share.join("JetBrains/Toolbox");
     if !dir.exists() {
         return Err(FindError::NotFound);
     } else if !dir.is_dir() {
         // I don't know why there would ever be a normal file there but why not
         return Err(FindError::InvalidInstallation);
     }
-    let binary = dir.join("bin/jetbrains-toolbox");
+    // In previous versions, the binary would copy itself to {dir}/bin
+    let mut binary = dir.join("bin/jetbrains-toolbox");
     if !binary.exists() {
-        return Err(FindError::InvalidInstallation);
+        // In newer versions, it doesn't. We use the desktop file to find
+        // the location of the binary, since the user can put it anywhere.
+        binary = get_binary_from_desktop(&binary)?;
     }
     let channels = dir.join("channels");
     if !channels.is_dir() {
@@ -118,6 +125,48 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
         channels,
         log,
     })
+}
+
+#[cfg(target_os = "linux")]
+fn get_binary_from_desktop(orig_binary: &Path) -> Result<PathBuf, FindError> {
+    let entries = freedesktop_desktop_entry::Iter::new(freedesktop_desktop_entry::default_paths())
+        .entries::<String>(None)
+        .collect::<Vec<_>>();
+
+    let mut matches = entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .path
+                .file_name()
+                .expect("Invalid desktop entry file; terminates in `..`")
+                == "jetbrains-toolbox.desktop"
+        })
+        .map(|entry| entry.exec().ok_or(FindError::DesktopFileMissingExec))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter();
+
+    // If multiple desktop files are found but they have the same `Exec` value, it's fine
+    let exec = match matches.next() {
+        None => {
+            return Err(FindError::NoDesktopFile(format!(
+                "No binary was found at {}, and no desktop file named `jetbrains-toolbox.desktop` was found",
+                orig_binary.display(),
+            )))
+        }
+        Some(first) => first,
+    };
+
+    // If they don't have the same `Exec` value, bail
+    if !matches.all(|x| x == exec) {
+        return Err(FindError::MultipleMismatchingDesktopFiles("Multiple desktop files called `jetbrains-toolbox.desktop` were found, and they have different values for Exec".to_string()));
+    }
+
+    let binary = exec.trim_end_matches(" %u");
+
+    println!("Detected binary at {binary} from desktop file");
+
+    Ok(PathBuf::from(binary))
 }
 
 #[cfg(target_os = "windows")]
