@@ -27,6 +27,7 @@ pub enum UpdateError {
     DoubleToolboxSelfUpdate,
     StartupFusAssistantTimeout,
     DoubleStartupFusAssistant,
+    BadLog(String),
 }
 
 impl From<io::Error> for UpdateError {
@@ -187,6 +188,7 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
 
 // Returns if it was open
 fn kill_all() -> Result<bool, UpdateError> {
+    println!("Killing Toolbox");
     let mut sys = System::new_all();
     sys.refresh_all();
     // TODO: this might not work on other platforms; look at this when adding support for Windows/MacOS
@@ -239,7 +241,6 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     installation: JetBrainsToolboxInstallation,
 ) -> Result<(), UpdateError> {
     // Close the app if it's open
-    println!("Killing Toolbox");
     let toolbox_was_open = kill_all()?;
 
     // Modify the configuration to enable automatic updates
@@ -324,13 +325,13 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
             file.seek(SeekFrom::Start(curr_position))?;
             sleep(Duration::from_millis(100));
         } else {
-            // TODO: Maybe just remove the downloading/checking checksum logic entirely,
-            //  and assume we always download the update?
             // Each update consists of first downloading, then checking the checksum, then a lot of other things.
             //  If the download is already there, it won't say "Downloading from", it will skip that
             //  and immediately say "Correct checksum for".
             //  This means that a "Correct checksum for" after there was a "Downloading from"
             //  should not be considered as the start of a separate update.
+            //  We need to support this, because pre-downloaded updates are a real thing that can
+            //  happen, e.g. with self-updates.
             if line.contains("Correct checksum for") || line.contains("Downloading from") {
                 if line.contains("Correct checksum for") && correct_checksums_expected > 0 {
                     println!("Verified a checksum for an update that was started earlier");
@@ -354,21 +355,34 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 } else {
                     println!("Update finished, waiting for other update(s) to finish")
                 }
+            } else if line.contains("Awaiting user action or background state to install.") {
+                println!(
+                    "Toolbox self-update is ready. The self-update will apply automatically \
+                    in 60 seconds if you don't open Toolbox, but you can also click the \
+                    'Restart Toolbox App to complete update' in the settings menu now."
+                )
             } else if line.contains(
                 "Shutting down. Reason: The updated app is starting, closing the current process",
             ) {
-                // Toolbox (self-)update finished. This does say "Downloading from" when starting.
-                // But since it restarted itself the state is messed up. We want to re-do the entire process once now.
+                // The self-update does abide by "Downloading from" and "Correct checksum for", but
+                // since it restarted itself, the state is messed up. We want to redo the entire process once now.
                 redo = true;
+                // Somehow even manually killing the process it's waiting for doesn't convince it.
+                // The only way to continue the self-update process is by waiting for the timeout.
                 println!(
-                    "Toolbox (self-)update finished, update process will restart in 10 seconds"
+                    "Toolbox self-update download finished. We will now wait 20 seconds for \
+                    waitForPid to timeout, then we will wait another 10 seconds to make sure \
+                    the self-update is fully installed."
                 );
-                // Letting it finish up. In this time, it will restart itself.
-                //  We could theoretically wait for the restart, but that is less necessary, since
-                //  self-updates are not very common compared to IDE updates.
-                //  It is also (probably?) not necessary to wait for the restart to fully complete,
-                //  we just want it to have finished any update-related shutdown or startup tasks.
-                sleep(Duration::from_secs(10));
+                sleep(Duration::from_secs(
+                    20
+                    // Letting it finish up. In this time, it will restart itself.
+                    //  We could theoretically wait for the restart, but that is less necessary, since
+                    //  self-updates are not very common compared to IDE updates.
+                    //  It is also (probably?) not necessary to wait for the restart to fully complete,
+                    //  we just want it to have finished any update-related shutdown or startup tasks.
+                    + 10,
+                ));
                 break;
             } else if line.contains("Downloaded fus-assistant.xml") {
                 if startup_time.is_some() {
@@ -382,7 +396,6 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
     }
 
     // Quit the app
-    println!("Killing Toolbox");
     if !kill_all()? {
         // We expect it to be running.
         return Err(UpdateError::PrematureExit);
