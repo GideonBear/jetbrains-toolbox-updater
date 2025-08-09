@@ -1,5 +1,4 @@
 use dirs::home_dir;
-use json::{JsonError, JsonValue};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -20,7 +19,7 @@ pub struct JetBrainsToolboxInstallation {
 #[non_exhaustive]
 pub enum UpdateError {
     Io(io::Error),
-    Json(JsonError),
+    Json(serde_json::Error),
     InvalidChannel,
     CouldNotTerminate(String),
     PrematureExit,
@@ -36,8 +35,8 @@ impl From<io::Error> for UpdateError {
     }
 }
 
-impl From<JsonError> for UpdateError {
-    fn from(err: JsonError) -> UpdateError {
+impl From<serde_json::Error> for UpdateError {
+    fn from(err: serde_json::Error) -> UpdateError {
         UpdateError::Json(err)
     }
 }
@@ -45,7 +44,7 @@ impl From<JsonError> for UpdateError {
 impl JetBrainsToolboxInstallation {
     fn update_all_channels<F>(&self, mut operation: F) -> Result<(), UpdateError>
     where
-        F: FnMut(&PathBuf, &mut JsonValue) -> Result<(), UpdateError>,
+        F: FnMut(&PathBuf, &mut serde_json::Value) -> Result<(), UpdateError>,
     {
         for file in fs::read_dir(&self.channels)? {
             let file = file?;
@@ -56,16 +55,16 @@ impl JetBrainsToolboxInstallation {
 
     fn update_channel<F>(&self, path: PathBuf, operation: &mut F) -> Result<(), UpdateError>
     where
-        F: FnMut(&PathBuf, &mut JsonValue) -> Result<(), UpdateError>,
+        F: FnMut(&PathBuf, &mut serde_json::Value) -> Result<(), UpdateError>,
     {
         let mut file = File::options().read(true).write(true).open(&path)?;
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
-        let mut data = json::parse(&buf)?;
+        let mut data: serde_json::Value = serde_json::from_str(&buf)?;
         operation(&path, &mut data)?;
         // Seek to the start, dump, then truncate, to avoid re-opening the file
         file.seek(SeekFrom::Start(0))?; // Seek
-        buf = data.dump();
+        buf = serde_json::to_string_pretty(&data)?;
         file.write_all(buf.as_bytes())?; // Dump
         let current_position = file.stream_position()?;
         file.set_len(current_position)?; // Truncate
@@ -407,11 +406,11 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
 fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<PathBuf>, UpdateError> {
     let mut skipped_channels = vec![];
     installation.update_all_channels(|channel, d| {
-        if !d.has_key("channel") {
+        if !d["channel"].is_object() {
             return Err(UpdateError::InvalidChannel);
         }
-        if d["channel"].has_key("autoUpdate") {
-            if d["channel"]["autoUpdate"] == true {
+        if let Some(auto_update) = d["channel"].get("autoUpdate") {
+            if auto_update.as_bool() == Some(true) {
                 // This channel is already auto-updating, we won't touch the configuration in this case
                 skipped_channels.push(channel.clone());
                 return Ok(());
@@ -432,14 +431,16 @@ fn reset_config(
     skipped_channels: Vec<PathBuf>,
 ) -> Result<(), UpdateError> {
     installation.update_all_channels(|channel, d| {
-        if !d.has_key("channel") {
+        if d.get("channel").is_none() {
             return Err(UpdateError::InvalidChannel);
         }
         if skipped_channels.contains(channel) {
             // Skip if it was skipped at the start as well
             return Ok(());
         }
-        d["channel"].remove("autoUpdate");
+        if let Some(channel_obj) = d.get_mut("channel").and_then(|v| v.as_object_mut()) {
+            channel_obj.remove("autoUpdate");
+        }
         Ok(())
     })?;
     Ok(())
