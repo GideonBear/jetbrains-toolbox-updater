@@ -370,8 +370,8 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 // The only way to continue the self-update process is by waiting for the timeout.
                 println!(
                     "Toolbox self-update download finished. We will now wait 20 seconds for \
-                    waitForPid to timeout, then we will wait another 10 seconds to make sure \
-                    the self-update is fully installed."
+                    waitForPid to timeout, then we will wait another 10 seconds to make sure the \
+                    self-update is fully installed. Then we will restart the update process once."
                 );
                 sleep(Duration::from_secs(
                     20
