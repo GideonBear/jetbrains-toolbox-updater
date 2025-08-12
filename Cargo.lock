@@ -116,6 +116,7 @@ version = "5.4.1"
 dependencies = [
  "dirs",
  "freedesktop-desktop-entry",
+ "log",
  "serde_json",
  "sysinfo",
 ]

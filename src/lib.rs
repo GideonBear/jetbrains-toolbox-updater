@@ -1,4 +1,5 @@
 use dirs::home_dir;
+use log::debug;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -164,7 +165,7 @@ fn get_binary_from_desktop(orig_binary: &Path) -> Result<PathBuf, FindError> {
 
     let binary = exec.trim_end_matches(" %u");
 
-    println!("Detected binary at {binary} from desktop file");
+    debug!("Detected binary at {binary} from desktop file");
 
     Ok(PathBuf::from(binary))
 }
