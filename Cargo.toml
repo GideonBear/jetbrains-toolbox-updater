@@ -1,6 +1,6 @@
 [package]
 name = "jetbrains-toolbox-updater"
-version = "5.4.3"
+version = "5.4.4"
 edition = "2021"
 authors = ["GideonBear"]
 description = "Application and library that updates JetBrains Toolbox IDE's on demand using some trickery"
