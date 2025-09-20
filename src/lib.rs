@@ -185,7 +185,7 @@ pub fn find_jetbrains_toolbox() -> Result<JetBrainsToolboxInstallation, FindErro
     Err(FindError::UnsupportedOS(std::env::consts::OS.to_string()))
 }
 
-// Returns if it was open
+/// Returns if it was open
 fn kill_all() -> Result<bool, UpdateError> {
     println!("Killing Toolbox");
     let mut sys = System::new_all();
