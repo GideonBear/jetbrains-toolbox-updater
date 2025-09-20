@@ -3,11 +3,15 @@
 
 CLI and library that updates [JetBrains Toolbox](https://www.jetbrains.com/toolbox-app/) IDE's on demand using some trickery.
 It currently supports Linux only, but Windows support is planned.
+
 ## Installation
 
-jetbrains-toolbox-updater is included as part of [topgrade](https://github.com/topgrade-rs/topgrade), but it can also be installed seperately using cargo:
+jetbrains-toolbox-updater is included as part of [topgrade](https://github.com/topgrade-rs/topgrade), but it can also be installed seperately:
 
 ```bash
+# Using cargo-binstall:
+cargo binstall jetbrains-toolbox-updater
+# Using cargo:
 cargo install jetbrains-toolbox-updater
 ```
 And used by running:
