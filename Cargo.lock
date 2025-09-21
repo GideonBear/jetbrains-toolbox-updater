@@ -67,7 +67,7 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "jetbrains-toolbox-updater"
-version = "5.4.4"
+version = "5.4.5"
 dependencies = [
  "dirs",
  "freedesktop-desktop-entry",
