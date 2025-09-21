@@ -1,24 +1,11 @@
-name: Release
+name: Build release assets
 
 on:
-  push:
-    tags:
-      - 'v*'
+  repository_dispatch:
+    types: [ release-created ]
 
 jobs:
-  create_release:
-    name: Create release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Create release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-
   native_build:
-    needs: create_release
     strategy:
       fail-fast: false
       matrix:
@@ -36,17 +23,12 @@ jobs:
       - name: Build in Release profile with all features enabled
         run: cargo build --release --all-features
 
-      - name: Determine tag name
-        id: determine_tag_name
-        shell: bash # Or it won't work on Windows
-        run: echo "tag_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-
       - name: Rename Release (Unix)
         run: |
           cargo install default-target
           CRATE_NAME=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].name')
           mkdir -p assets
-          FILENAME=${CRATE_NAME}-${{ steps.determine_tag_name.outputs.tag_name }}-$(default-target)
+          FILENAME=${CRATE_NAME}-${{ github.event.client_payload.tag }}-$(default-target)
           mv target/release/$CRATE_NAME assets
           cd assets
           tar --format=ustar -czf $FILENAME.tar.gz $CRATE_NAME
@@ -60,7 +42,7 @@ jobs:
       #          cargo install default-target
       #          CRATE_NAME=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].name')
       #          mkdir assets
-      #          FILENAME=${CRATE_NAME}-${{steps.determine_tag_name.outputs.tag_name}}-$(default-target)
+      #          FILENAME=${CRATE_NAME}-${{ github.event.client_payload.tag }}-$(default-target)
       #          mv target/release/${CRATE_NAME}.exe assets
       #          cd assets
       #          powershell Compress-Archive -Path * -Destination ${FILENAME}.zip
@@ -69,28 +51,8 @@ jobs:
       #        if: ${{ matrix.platform == 'windows-latest' }}
       #        shell: bash
 
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.determine_tag_name.outputs.tag_name }}
-          files: assets/*
-  
-  publish_crates_io:
-    runs-on: ubuntu-latest
-    environment: crates_io
-    permissions:
-      id-token: write  # For trusted publishing
-
-    steps:
-      - uses: actions/checkout@v4
-      - name: Update toolchain
-        run: rustup install stable
-      #      - uses: Swatinem/rust-cache@v2
-
-      - uses: rust-lang/crates-io-auth-action@v1
-        id: auth
-
-      - name: "cargo publish"
-        run: cargo publish
+      - name: Upload assets
+        run:
+          gh release upload "${{ github.event.client_payload.tag }}" assets/*
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
