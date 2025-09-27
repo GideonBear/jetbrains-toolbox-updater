@@ -3,14 +3,8 @@
 // use clap::Parser;
 use jetbrains_toolbox_updater::{find_jetbrains_toolbox, update_jetbrains_toolbox};
 
-// pub mod built_info {
-//     include!(concat!(env!("OUT_DIR"), "/built.rs"));
-// }
-//
-// const VERSION: &str = built_info::PKG_VERSION;
-//
 // #[derive(Parser, Debug)]
-// #[command(name = "jetbrains-toolbox-updater", author, long_version = crate::VERSION)]
+// #[command(name = "jetbrains-toolbox-updater", version)]
 // #[command(about = "Updates JetBrains Toolbox IDE's on demand using some trickery")]
 // #[command(propagate_version = true)]
 // struct Cli {}
