@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.4.7](https://github.com/GideonBear/jetbrains-toolbox-updater/compare/v5.4.6...v5.4.7) - 2025-09-27
+
+### Other
+
+- Improve (commented-out) CLI
+
 ## [5.4.6](https://github.com/GideonBear/jetbrains-toolbox-updater/compare/v5.4.5...v5.4.6) - 2025-09-24
 
 ### Other
