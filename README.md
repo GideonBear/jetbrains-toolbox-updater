@@ -28,3 +28,7 @@ The process is as follows:
 4. Monitor the logs for possible updates, and wait until they're complete
 5. Quit and reset the configuration
 6. Restart JetBrains Toolbox if it was open
+
+## MSRV
+
+Find the current MSRV in `Cargo.toml` under `rust-version`. This MSRV will only be bumped in a major release.

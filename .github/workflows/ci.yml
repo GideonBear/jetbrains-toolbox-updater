@@ -1,0 +1,83 @@
+name: Rust CI
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Format (cargo fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+
+      - run: rustup component add rustfmt
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+  msrv:
+    name: MSRV check
+    needs: [ format ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+
+      - name: Pin toolchain to MSRV
+        run: |
+          msrv=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].rust_version')
+          rustup override set "$msrv"
+
+      - name: cargo check
+        run: cargo check --locked --all-features -- --deny warnings
+
+  main:
+    needs: [ format ]
+    name: ${{ matrix.target_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_name: Linux
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+
+          - target_name: Windows
+            target: x86_64-pc-windows-msvc
+            os: windows-latest
+
+          - target_name: macOS-aarch64
+            target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+        with:
+          key: ${{ matrix.target }}
+
+      - run: rustup component add clippy
+
+      - name: cargo clippy
+        run: cargo clippy --locked --all-features -- --deny warnings
+
+      # Lint tests seperately, since `--tests` ignores any `cfg(not(test))` code, and "unused"s can slip by
+      - name: cargo clippy --tests
+        run: cargo clippy --locked --all-features --tests -- --deny warnings
+
+      - name: cargo test
+        run: cargo test --locked

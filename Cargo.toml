@@ -8,6 +8,7 @@ repository = "https://github.com/GideonBear/jetbrains-toolbox-updater"
 license = "GPL-3.0-only"
 keywords = ["jetbrains", "toolbox", "update", "upgrade"]
 categories = ["command-line-utilities"]
+rust-version = "1.84.1"
 
 [dependencies]
 #clap = { version = "4.5.37", features = ["derive"], optional = true }
