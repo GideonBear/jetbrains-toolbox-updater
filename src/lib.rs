@@ -1,8 +1,12 @@
+#[cfg(target_os = "linux")]
 use dirs::home_dir;
+#[cfg(target_os = "linux")]
 use log::debug;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
