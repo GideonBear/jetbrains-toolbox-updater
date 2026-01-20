@@ -6,7 +6,7 @@ It currently supports Linux only, but Windows support is planned.
 
 ## Installation
 
-jetbrains-toolbox-updater is included as part of [topgrade](https://github.com/topgrade-rs/topgrade), but it can also be installed seperately:
+jetbrains-toolbox-updater is included as part of [topgrade](https://github.com/topgrade-rs/topgrade), but it can also be installed separately:
 
 ```bash
 # Using cargo-binstall:
