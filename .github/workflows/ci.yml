@@ -41,8 +41,11 @@ jobs:
           msrv=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].rust_version')
           rustup override set "$msrv"
 
+      - name: Print toolchain version
+        run: rustc --version
+
       - name: cargo check
-        run: cargo check --locked --all-features -- --deny warnings
+        run: cargo check --locked --all-features
 
   main:
     needs: [ format ]
@@ -71,6 +74,9 @@ jobs:
           key: ${{ matrix.target }}
 
       - run: rustup component add clippy
+
+      - name: Print toolchain version
+        run: rustc --version
 
       - name: cargo clippy
         run: cargo clippy --locked --all-features -- --deny warnings
