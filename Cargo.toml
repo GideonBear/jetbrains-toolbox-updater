@@ -1,6 +1,6 @@
 [package]
 name = "jetbrains-toolbox-updater"
-version = "5.4.6"
+version = "6.0.0"
 edition = "2021"
 description = "Application and library that updates JetBrains Toolbox IDE's on demand using some trickery"
 readme = "README.md"
