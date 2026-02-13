@@ -3,7 +3,7 @@ use dirs::home_dir;
 #[cfg(target_os = "linux")]
 use log::debug;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _};
 #[cfg(target_os = "linux")]
 use std::path::Path;
 use std::path::PathBuf;
@@ -35,14 +35,14 @@ pub enum UpdateError {
 }
 
 impl From<io::Error> for UpdateError {
-    fn from(err: io::Error) -> UpdateError {
-        UpdateError::Io(err)
+    fn from(err: io::Error) -> Self {
+        Self::Io(err)
     }
 }
 
 impl From<serde_json::Error> for UpdateError {
-    fn from(err: serde_json::Error) -> UpdateError {
-        UpdateError::Json(err)
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json(err)
     }
 }
 
@@ -163,7 +163,7 @@ fn get_binary_from_desktop(orig_binary: &Path) -> Result<PathBuf, FindError> {
 
     // If they don't have the same `Exec` value, bail
     if !matches.all(|x| x == exec) {
-        return Err(FindError::MultipleMismatchingDesktopFiles("Multiple desktop files called `jetbrains-toolbox.desktop` were found, and they have different values for Exec".to_string()));
+        return Err(FindError::MultipleMismatchingDesktopFiles("Multiple desktop files called `jetbrains-toolbox.desktop` were found, and they have different values for Exec".to_owned()));
     }
 
     let binary = exec.trim_end_matches(" %u");
@@ -202,7 +202,7 @@ fn kill_all() -> Result<bool, UpdateError> {
             let exe = p.exe()?; // Skip if no exe available
             let name = p.name();
             match exe.file_name().ok_or(UpdateError::CouldNotTerminate(
-                "Error getting file_name".to_string(),
+                "Error getting file_name".to_owned(),
             )) {
                 // There are some weird quirks with processes here.
                 //  psutil in python never had a problem with this, but sysinfo
@@ -356,14 +356,14 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                     sleep(Duration::from_secs(2)); // Letting it finish up
                     break;
                 } else {
-                    println!("Update finished, waiting for other update(s) to finish")
+                    println!("Update finished, waiting for other update(s) to finish");
                 }
             } else if line.contains("Awaiting user action or background state to install.") {
                 println!(
                     "Toolbox self-update is ready. The self-update will apply automatically \
                     in 60 seconds if you don't open Toolbox, but you can also click the \
                     'Restart Toolbox App to complete update' in the settings menu now."
-                )
+                );
             } else if line.contains(
                 "Shutting down. Reason: The updated app is starting, closing the current process",
             ) {
@@ -393,7 +393,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                     return Err(UpdateError::DoubleStartupFusAssistant);
                 }
                 println!("Toolbox started");
-                startup_time = Some(Instant::now())
+                startup_time = Some(Instant::now());
             }
         }
     }
