@@ -26,3 +26,64 @@ freedesktop-desktop-entry = { version = "0.8.0", default-features = false }
 #[[bin]]
 #name = "jetbrains-toolbox-updater"
 #required-features = ["cli"]
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+missing_errors_doc = "allow"  # This is not a library, I'm not writing documentation
+if_not_else = "allow"  # This is often a deliberate choice for readability
+redundant_else = "allow"  # Less readable
+items_after_statements = "allow"  # Less readable, often used once directly after
+multiple_crate_versions = "allow"  # I'm using Renovate, I can't do anything about what dependencies do
+
+panic = "warn"  # Add an #[expect] with a good reason
+# TODO: for library: add "otherwise, document"
+missing_panics_doc = "warn"  # Add an #[expect] with a good reason. Catches other panics like .unwrap or .expect
+#expect_used = "warn"  # TODO
+#unwrap_used = "warn"  # TODO
+#indexing_slicing = "warn"  # TODO
+#string_slice = "warn"  # TODO
+#print_stdout = "warn"  # Use logger instead
+print_stderr = "warn"  # Use logger instead
+arithmetic_side_effects = "warn"  # Explicitly use .checked_*().unwrap() to avoid silent wrapping in release mode
+as_underscore = "warn"  # Make it explicit
+cfg_not_test = "warn"  # Don't use
+dbg_macro = "warn"  # Should not be committed, use tracing::debug! instead
+empty_enum_variants_with_brackets = "warn"  # Don't use
+empty_structs_with_brackets = "warn"  # Don't use
+get_unwrap = "warn"  # Use [] indexing instead, or handle the error
+infinite_loop = "warn"  # Likely a mistake
+lossy_float_literal = "warn"  # Likely a mistake
+map_with_unused_argument_over_ranges = "warn"  # Use iter::repeat instead
+mixed_read_write_in_expression = "warn"  # Write less confusingly
+module_name_repetitions = "warn"  # No repetition
+multiple_inherent_impl = "warn"  # Combine impl blocks
+non_zero_suggestions = "warn"  # Likely a mistake
+partial_pub_fields = "warn"  # Why would you do this?
+pathbuf_init_then_push = "warn"  # Use from/.join instead
+precedence_bits = "warn"  # Confusing
+pub_without_shorthand = "warn"  # Consistency
+redundant_test_prefix = "warn"  # Consitency, shorter
+renamed_function_params = "warn"  # Consistency
+rest_pat_in_fully_bound_structs = "warn"  # Clearer
+return_and_then = "warn"  # Clearer
+same_name_method = "warn"  # Give it a different name if possible
+self_named_module_files = "warn"  # Consistency
+semicolon_inside_block = "warn"  # Consistency
+separated_literal_suffix = "warn"  # Consistency
+str_to_string = "warn"  # Consistency
+tests_outside_test_module = "warn"  # Consistency
+todo = "warn"  # Should not be committed
+unimplemented = "warn"  # Should not be committed
+try_err = "warn"  # Use return Err(x); instead
+unnecessary_self_imports = "warn"  # Consistency and readability
+unused_result_ok = "warn"  # Use let _ = instead
+unused_trait_names = "warn"  # More explicit
+verbose_file_reads = "warn"  # Probably able to be written cleaner
+wildcard_enum_match_arm = "warn"  # Write out the cases explicitly (in most cases)
+
+# Project
+
+print_stdout = "allow"  # No logging (yet?)
