@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0](https://github.com/GideonBear/jetbrains-toolbox-updater/compare/v5.4.6...v6.0.0) - 2026-03-08
+
+### Breaking changes
+
+- bump MSRV to 1.88.0
+- add and test MSRV
+
+### Fixed
+
+- *(deps)* update rust crate freedesktop-desktop-entry to 0.8.0 ([#38](https://github.com/GideonBear/jetbrains-toolbox-updater/pull/38))
+
 ## [5.4.6](https://github.com/GideonBear/jetbrains-toolbox-updater/compare/v5.4.5...v5.4.6) - 2025-09-24
 
 ### Other
