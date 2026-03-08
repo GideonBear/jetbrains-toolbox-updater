@@ -156,7 +156,7 @@ fn get_binary_from_desktop(orig_binary: &Path) -> Result<PathBuf, FindError> {
             return Err(FindError::NoDesktopFile(format!(
                 "No binary was found at {}, and no desktop file named `jetbrains-toolbox.desktop` was found",
                 orig_binary.display(),
-            )))
+            )));
         }
         Some(first) => first,
     };
@@ -308,12 +308,12 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
             return Err(UpdateError::StartupFusAssistantTimeout);
         }
 
-        if let Some(startup_time) = startup_time {
+        if let Some(startup_time) = startup_time
             // If 10 seconds pass from startup, we assume there are no updates
-            if updates == 0 && startup_time + Duration::from_secs(10) < Instant::now() {
-                println!("No updates found");
-                break;
-            }
+            && updates == 0 && startup_time + Duration::from_secs(10) < Instant::now()
+        {
+            println!("No updates found");
+            break;
         }
 
         let curr_position = file.stream_position()?;
