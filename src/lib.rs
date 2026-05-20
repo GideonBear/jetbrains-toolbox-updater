@@ -348,12 +348,12 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                     // We expect "Correct checksum for" to be broadcast exactly once after the "Downloading from".
                     correct_checksums_expected += 1;
                 }
-            } else if line.contains("Show notification") {
+            } else if line.contains("update-notification") {
                 // Update finished
                 updates -= 1;
                 if updates == 0 {
-                    println!("All updates finished, exiting in 2 seconds");
-                    sleep(Duration::from_secs(2)); // Letting it finish up
+                    println!("All updates finished, exiting in 30 seconds");
+                    sleep(Duration::from_secs(30)); // Letting it finish up the "Configuring" step
                     break;
                 } else {
                     println!("Update finished, waiting for other update(s) to finish");
