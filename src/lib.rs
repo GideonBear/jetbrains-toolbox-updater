@@ -1,5 +1,5 @@
 #[cfg(target_os = "linux")]
-use dirs::home_dir;
+use std::env::home_dir;
 #[cfg(target_os = "linux")]
 use log::debug;
 use std::fs::File;
