@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
-use std::env::home_dir;
-#[cfg(target_os = "linux")]
 use log::debug;
+#[cfg(target_os = "linux")]
+use std::env::home_dir;
 use std::fs::File;
 use std::io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _};
 #[cfg(target_os = "linux")]
