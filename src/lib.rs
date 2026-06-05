@@ -361,7 +361,7 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
             } else if line.contains("Awaiting user action or background state to install.") {
                 println!(
                     "Toolbox self-update is ready. The self-update will apply automatically \
-                    in 60 seconds if you don't open Toolbox, but you can also click the \
+                    in 60 seconds if you don't open Toolbox, but you can also click \
                     'Restart Toolbox App to complete update' in the settings menu now."
                 );
             } else if line.contains(
