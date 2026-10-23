@@ -8,6 +8,8 @@ use std::io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as 
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::{fs, io};
@@ -32,6 +34,7 @@ pub enum UpdateError {
     StartupFusAssistantTimeout,
     DoubleStartupFusAssistant,
     BadLog(String),
+    Interrupted,
 }
 
 impl From<io::Error> for UpdateError {
@@ -78,7 +81,12 @@ impl JetBrainsToolboxInstallation {
     }
 
     fn start_minimized(&self) -> io::Result<Child> {
-        Command::new(&self.binary).arg("--minimize").spawn()
+        let mut command = Command::new(&self.binary);
+        // Toolbox quits on SIGINT, so keep it out of the terminal's process group,
+        //  where it would receive the user's Ctrl+C
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        command.arg("--minimize").spawn()
     }
 }
 
@@ -234,14 +242,57 @@ fn kill_all() -> Result<bool, UpdateError> {
     })
 }
 
+/// Sets `interrupted` on Ctrl+C while it exists. A previously installed handler (e.g. Topgrade's)
+/// is still called.
+struct CtrlCGuard {
+    interrupted: Arc<AtomicBool>,
+    #[cfg(unix)]
+    id: signal_hook::SigId,
+}
+
+impl CtrlCGuard {
+    fn new() -> Result<Self, UpdateError> {
+        let interrupted = Arc::new(AtomicBool::new(false));
+        Ok(Self {
+            #[cfg(unix)]
+            id: signal_hook::flag::register(signal_hook::consts::SIGINT, interrupted.clone())?,
+            interrupted,
+        })
+    }
+}
+
+impl Drop for CtrlCGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        signal_hook::low_level::unregister(self.id);
+    }
+}
+
+/// Sleeps for `duration`, or returns early with [`UpdateError::Interrupted`] on Ctrl+C
+fn sleep_unless_interrupted(
+    duration: Duration,
+    interrupted: &AtomicBool,
+) -> Result<(), UpdateError> {
+    let start = Instant::now();
+    while start.elapsed() < duration {
+        if interrupted.load(Ordering::Relaxed) {
+            return Err(UpdateError::Interrupted);
+        }
+        sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
 pub fn update_jetbrains_toolbox(
     installation: JetBrainsToolboxInstallation,
 ) -> Result<(), UpdateError> {
-    _update_jetbrains_toolbox::<false>(installation)
+    let ctrl_c = CtrlCGuard::new()?;
+    _update_jetbrains_toolbox::<false>(installation, &ctrl_c.interrupted)
 }
 
 fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     installation: JetBrainsToolboxInstallation,
+    interrupted: &AtomicBool,
 ) -> Result<(), UpdateError> {
     // Close the app if it's open
     let toolbox_was_open = kill_all()?;
@@ -249,10 +300,14 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     // Modify the configuration to enable automatic updates
     let mut modified_channels = vec![];
     let redo = match change_config(&installation, &mut modified_channels)
-        .and_then(|()| actual_update(&installation))
+        .and_then(|()| actual_update(&installation, interrupted))
     {
         Err(e) => {
-            println!("Unexpected error encountered, restoring Toolbox to its previous state");
+            if matches!(e, UpdateError::Interrupted) {
+                println!("Interrupted, restoring Toolbox to its previous state");
+            } else {
+                println!("Unexpected error encountered, restoring Toolbox to its previous state");
+            }
             if let Err(restore_err) = restore(&installation, toolbox_was_open, &modified_channels) {
                 println!("Error while restoring Toolbox's previous state: {restore_err:?}");
             }
@@ -281,14 +336,17 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
             return Err(UpdateError::DoubleToolboxSelfUpdate);
         }
 
-        _update_jetbrains_toolbox::<true>(installation)
+        _update_jetbrains_toolbox::<true>(installation, interrupted)
     } else {
         Ok(())
     }
 }
 
 /// Returns redo
-fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, UpdateError> {
+fn actual_update(
+    installation: &JetBrainsToolboxInstallation,
+    interrupted: &AtomicBool,
+) -> Result<bool, UpdateError> {
     let mut redo = false;
 
     // Start the app in the background
@@ -305,6 +363,10 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
     let mut file = BufReader::new(file);
     file.seek(SeekFrom::End(0))?;
     loop {
+        if interrupted.load(Ordering::Relaxed) {
+            return Err(UpdateError::Interrupted);
+        }
+
         // If 60 seconds pass without the startup event happening, something's wrong.
         //  Even if there are updates found.
         if startup_time.is_none() && start_time + Duration::from_secs(60) < Instant::now() {
@@ -356,7 +418,8 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                 updates -= 1;
                 if updates == 0 {
                     println!("All updates finished, exiting in 30 seconds");
-                    sleep(Duration::from_secs(30)); // Letting it finish up the "Configuring" step
+                    // Letting it finish up the "Configuring" step
+                    sleep_unless_interrupted(Duration::from_secs(30), interrupted)?;
                     break;
                 } else {
                     println!("Update finished, waiting for other update(s) to finish");
@@ -380,15 +443,18 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
                     waitForPid to timeout, then we will wait another 10 seconds to make sure the \
                     self-update is fully installed. Then we will restart the update process once."
                 );
-                sleep(Duration::from_secs(
-                    20
+                sleep_unless_interrupted(
+                    Duration::from_secs(
+                        20
                     // Letting it finish up. In this time, it will restart itself.
                     //  We could theoretically wait for the restart, but that is less necessary, since
                     //  self-updates are not very common compared to IDE updates.
                     //  It is also (probably?) not necessary to wait for the restart to fully complete,
                     //  we just want it to have finished any update-related shutdown or startup tasks.
                     + 10,
-                ));
+                    ),
+                    interrupted,
+                )?;
                 break;
             } else if line.contains("Downloaded fus-assistant.xml") {
                 if startup_time.is_some() {
@@ -573,5 +639,54 @@ mod tests {
         assert_eq!(auto_update(&installation, "invalid.json"), Some(false));
 
         fs::remove_dir_all(&installation.channels).unwrap();
+    }
+
+    #[test]
+    fn sleep_unless_interrupted_sleeps() {
+        let interrupted = AtomicBool::new(false);
+        let start = Instant::now();
+        sleep_unless_interrupted(Duration::from_millis(300), &interrupted).unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(300));
+    }
+
+    #[test]
+    fn sleep_unless_interrupted_returns_early() {
+        let interrupted = AtomicBool::new(false);
+        let start = Instant::now();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                sleep(Duration::from_millis(200));
+                interrupted.store(true, Ordering::Relaxed);
+            });
+            let result = sleep_unless_interrupted(Duration::from_secs(10), &interrupted);
+            assert!(matches!(result, Err(UpdateError::Interrupted)));
+        });
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    // All signal assertions are in one test, since signal handlers are process-wide
+    //  and tests run in parallel
+    #[cfg(unix)]
+    #[test]
+    fn ctrl_c_guard() {
+        use signal_hook::consts::SIGINT;
+        use signal_hook::low_level::raise;
+
+        // Stands in for the handler of the application using this library, e.g. Topgrade
+        let previous = Arc::new(AtomicBool::new(false));
+        signal_hook::flag::register(SIGINT, previous.clone()).unwrap();
+
+        let guard = CtrlCGuard::new().unwrap();
+        raise(SIGINT).unwrap();
+        assert!(guard.interrupted.load(Ordering::Relaxed));
+        assert!(previous.load(Ordering::Relaxed));
+
+        let interrupted = guard.interrupted.clone();
+        interrupted.store(false, Ordering::Relaxed);
+        previous.store(false, Ordering::Relaxed);
+        drop(guard);
+        raise(SIGINT).unwrap();
+        assert!(!interrupted.load(Ordering::Relaxed));
+        assert!(previous.load(Ordering::Relaxed));
     }
 }
