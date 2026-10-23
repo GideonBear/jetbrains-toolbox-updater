@@ -1,6 +1,5 @@
 #[cfg(target_os = "linux")]
 use log::debug;
-#[cfg(target_os = "linux")]
 use std::env::home_dir;
 use std::fs::File;
 use std::io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _};
@@ -86,6 +85,11 @@ impl JetBrainsToolboxInstallation {
         //  where it would receive the user's Ctrl+C
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        // Don't inherit our working directory: it may be deleted while Toolbox is still
+        //  starting (Topgrade runs steps in a temporary directory), which makes it crash
+        if let Some(home_dir) = home_dir() {
+            command.current_dir(home_dir);
+        }
         command.arg("--minimize").spawn()
     }
 }
