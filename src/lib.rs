@@ -247,19 +247,22 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     let toolbox_was_open = kill_all()?;
 
     // Modify the configuration to enable automatic updates
-    let skipped_channels = change_config(&installation)?;
-
-    let redo = match actual_update(&installation) {
+    let mut modified_channels = vec![];
+    let redo = match change_config(&installation, &mut modified_channels)
+        .and_then(|()| actual_update(&installation))
+    {
         Err(e) => {
-            println!("Unexpected error encountered, resetting configuration to previous state");
-            reset_config(&installation, skipped_channels)?;
+            println!("Unexpected error encountered, restoring Toolbox to its previous state");
+            if let Err(restore_err) = restore(&installation, toolbox_was_open, &modified_channels) {
+                println!("Error while restoring Toolbox's previous state: {restore_err:?}");
+            }
             return Err(e);
         }
         Ok(redo) => redo,
     };
 
     // Reset the configuration
-    reset_config(&installation, skipped_channels)?;
+    reset_config(&installation, &modified_channels)?;
 
     // Restart the app if it was open
     if toolbox_was_open {
@@ -407,8 +410,28 @@ fn actual_update(installation: &JetBrainsToolboxInstallation) -> Result<bool, Up
     Ok(redo)
 }
 
-fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<PathBuf>, UpdateError> {
-    let mut skipped_channels = vec![];
+/// Puts Toolbox back the way it was before the update started
+fn restore(
+    installation: &JetBrainsToolboxInstallation,
+    toolbox_was_open: bool,
+    modified_channels: &[PathBuf],
+) -> Result<(), UpdateError> {
+    // Close our instance, if it's running
+    kill_all()?;
+    reset_config(installation, modified_channels)?;
+    if toolbox_was_open {
+        println!("Re-opening Toolbox");
+        installation.start_minimized()?;
+    }
+    Ok(())
+}
+
+/// Adds every channel it enables automatic updates for to `modified_channels`,
+/// even if it fails halfway through
+fn change_config(
+    installation: &JetBrainsToolboxInstallation,
+    modified_channels: &mut Vec<PathBuf>,
+) -> Result<(), UpdateError> {
     installation.update_all_channels(|channel, d| {
         if !d["channel"].is_object() {
             return Err(UpdateError::InvalidChannel);
@@ -416,7 +439,6 @@ fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<Path
         if let Some(auto_update) = d["channel"].get("autoUpdate") {
             if auto_update.as_bool() == Some(true) {
                 // This channel is already auto-updating, we won't touch the configuration in this case
-                skipped_channels.push(channel.clone());
                 return Ok(());
             } else {
                 // We expect autoUpdate to be missing if it's false
@@ -425,21 +447,21 @@ fn change_config(installation: &JetBrainsToolboxInstallation) -> Result<Vec<Path
         }
 
         d["channel"]["autoUpdate"] = true.into();
+        modified_channels.push(channel.clone());
         Ok(())
-    })?;
-    Ok(skipped_channels)
+    })
 }
 
 fn reset_config(
     installation: &JetBrainsToolboxInstallation,
-    skipped_channels: Vec<PathBuf>,
+    modified_channels: &[PathBuf],
 ) -> Result<(), UpdateError> {
     installation.update_all_channels(|channel, d| {
         if d.get("channel").is_none() {
             return Err(UpdateError::InvalidChannel);
         }
-        if skipped_channels.contains(channel) {
-            // Skip if it was skipped at the start as well
+        if !modified_channels.contains(channel) {
+            // Skip if we didn't enable automatic updates for it
             return Ok(());
         }
         if let Some(channel_obj) = d.get_mut("channel").and_then(|v| v.as_object_mut()) {
@@ -448,4 +470,108 @@ fn reset_config(
         Ok(())
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An installation whose channels folder is a fresh temporary directory
+    fn installation_with_channels(
+        name: &str,
+        channels: &[(&str, &str)],
+    ) -> JetBrainsToolboxInstallation {
+        let dir = std::env::temp_dir().join(format!(
+            "jetbrains-toolbox-updater-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for (file_name, contents) in channels {
+            fs::write(dir.join(file_name), contents).unwrap();
+        }
+        JetBrainsToolboxInstallation {
+            binary: PathBuf::from("jetbrains-toolbox"),
+            channels: dir,
+            log: PathBuf::from("toolbox.latest.log"),
+        }
+    }
+
+    fn auto_update(installation: &JetBrainsToolboxInstallation, file_name: &str) -> Option<bool> {
+        let buf = fs::read_to_string(installation.channels.join(file_name)).unwrap();
+        let data: serde_json::Value = serde_json::from_str(&buf).unwrap();
+        data["channel"]
+            .get("autoUpdate")
+            .map(|v| v.as_bool().unwrap())
+    }
+
+    #[test]
+    fn change_and_reset_config() {
+        let installation = installation_with_channels(
+            "change-and-reset",
+            &[
+                ("manual.json", r#"{"channel": {"id": "a"}}"#),
+                (
+                    "auto.json",
+                    r#"{"channel": {"id": "b", "autoUpdate": true}}"#,
+                ),
+            ],
+        );
+
+        let mut modified_channels = vec![];
+        change_config(&installation, &mut modified_channels).unwrap();
+        assert_eq!(
+            modified_channels,
+            [installation.channels.join("manual.json")]
+        );
+        assert_eq!(auto_update(&installation, "manual.json"), Some(true));
+        assert_eq!(auto_update(&installation, "auto.json"), Some(true));
+
+        reset_config(&installation, &modified_channels).unwrap();
+        assert_eq!(auto_update(&installation, "manual.json"), None);
+        assert_eq!(auto_update(&installation, "auto.json"), Some(true));
+
+        fs::remove_dir_all(&installation.channels).unwrap();
+    }
+
+    #[test]
+    fn reset_config_after_partial_change_config() {
+        // Several valid channels, so some are most likely visited before the invalid one.
+        //  The assertions hold whatever order the directory is read in.
+        let mut channels = vec![
+            (
+                "auto.json",
+                r#"{"channel": {"id": "auto", "autoUpdate": true}}"#,
+            ),
+            (
+                "invalid.json",
+                r#"{"channel": {"id": "invalid", "autoUpdate": false}}"#,
+            ),
+        ];
+        let manual: Vec<_> = (0..8).map(|i| format!("manual-{i}.json")).collect();
+        for file_name in &manual {
+            channels.push((file_name, r#"{"channel": {"id": "manual"}}"#));
+        }
+        let installation = installation_with_channels("partial", &channels);
+
+        let mut modified_channels = vec![];
+        let result = change_config(&installation, &mut modified_channels);
+        assert!(matches!(result, Err(UpdateError::InvalidChannel)));
+        // Exactly the channels that now have autoUpdate set are recorded
+        for file_name in &manual {
+            assert_eq!(
+                modified_channels.contains(&installation.channels.join(file_name)),
+                auto_update(&installation, file_name) == Some(true),
+            );
+        }
+
+        reset_config(&installation, &modified_channels).unwrap();
+        for file_name in &manual {
+            assert_eq!(auto_update(&installation, file_name), None);
+        }
+        assert_eq!(auto_update(&installation, "auto.json"), Some(true));
+        assert_eq!(auto_update(&installation, "invalid.json"), Some(false));
+
+        fs::remove_dir_all(&installation.channels).unwrap();
+    }
 }
