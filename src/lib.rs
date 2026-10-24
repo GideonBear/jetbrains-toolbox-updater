@@ -3,9 +3,7 @@ use log::debug;
 use std::env::home_dir;
 use std::fs::File;
 use std::io::{BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _};
-#[cfg(target_os = "linux")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,6 +32,7 @@ pub enum UpdateError {
     DoubleStartupFusAssistant,
     BadLog(String),
     Interrupted,
+    UpdateTimeout,
 }
 
 impl From<io::Error> for UpdateError {
@@ -346,6 +345,199 @@ fn _update_jetbrains_toolbox<const IS_RECURSIVE: bool>(
     }
 }
 
+/// How long to wait after the last update finished, since Toolbox sometimes starts another one
+///  (e.g. it can update the same IDE twice in a row)
+const SETTLE_TIME: Duration = Duration::from_secs(15);
+/// How long to wait when the log doesn't add up. E.g. a major version update (with a new
+///  configuration folder) doesn't run the post-install step, so it never reports finishing it.
+const QUIET_TIME: Duration = Duration::from_secs(2 * 60);
+/// How long a download can go without any update-related log line before we give up
+const STALL_TIME: Duration = Duration::from_secs(10 * 60);
+
+/// Something update-related that Toolbox logged
+#[derive(Debug, PartialEq)]
+enum UpdateEvent {
+    DownloadStarted(String),
+    DownloadVerified(String),
+    /// A checksum was verified for a file we didn't see being downloaded, e.g. because it was
+    ///  downloaded earlier
+    PreDownloaded(String),
+    InstallStarted(String),
+    InstallFinished,
+    /// An IDE can't be updated because it's running
+    InstallBlocked(String),
+    SelfUpdatePending,
+    /// Any other line that shows an update is still progressing
+    Progress,
+}
+
+/// Keeps track of the updates Toolbox is working on, based on its log.
+///
+/// Toolbox doesn't log a reliable "update finished" line, so instead we keep track of what's
+///  still in progress: files being downloaded, downloaded files that still need to be
+///  installed, and installs that are still running their post-install step.
+#[derive(Debug, Default)]
+struct UpdateProgress {
+    /// Files that are being downloaded, but whose checksum hasn't been verified yet
+    downloads: Vec<String>,
+    /// Files whose checksum has been verified. Each one is installed, except patches: a chain of
+    ///  patches (e.g. `IU-1-2-patch-unix.jar` and `IU-2-3-patch-unix.jar`) is installed once.
+    verified: Vec<String>,
+    installs_started: u32,
+    installs_finished: u32,
+    /// IDE's that can't be updated because they're running
+    blocked: Vec<String>,
+    /// Whether a Toolbox self-update is waiting to be applied
+    self_update_pending: bool,
+    /// When the last update-related line was logged, if there was one
+    last_activity: Option<Instant>,
+}
+
+impl UpdateProgress {
+    fn on_line(&mut self, line: &str, now: Instant) -> Option<UpdateEvent> {
+        let event = match parse_update_event(line)? {
+            UpdateEvent::DownloadVerified(file) if !self.downloads.contains(&file) => {
+                UpdateEvent::PreDownloaded(file)
+            }
+            event => event,
+        };
+        match &event {
+            UpdateEvent::DownloadStarted(file) => {
+                // A download that is resumed is logged again
+                if !self.downloads.contains(file) {
+                    self.downloads.push(file.clone());
+                }
+            }
+            UpdateEvent::DownloadVerified(file) | UpdateEvent::PreDownloaded(file) => {
+                self.downloads.retain(|f| f != file);
+                // The self-update isn't installed like the IDE's are
+                if !file.starts_with("jetbrains-toolbox-") {
+                    self.verified.push(file.clone());
+                }
+            }
+            UpdateEvent::InstallStarted(_) => self.installs_started += 1,
+            UpdateEvent::InstallFinished => self.installs_finished += 1,
+            UpdateEvent::InstallBlocked(tool) => {
+                if !self.blocked.contains(tool) {
+                    self.blocked.push(tool.clone());
+                }
+            }
+            UpdateEvent::SelfUpdatePending => self.self_update_pending = true,
+            UpdateEvent::Progress => {}
+        }
+        self.last_activity = Some(now);
+        Some(event)
+    }
+
+    /// The number of installs we expect, based on the verified files
+    fn expected_installs(&self) -> usize {
+        let patches: Vec<(&str, &str, &str)> = self
+            .verified
+            .iter()
+            .filter_map(|f| parse_patch(f))
+            .collect();
+        let full_downloads = self.verified.len() - patches.len();
+        // Count the last patch of every chain: the one that no other patch continues from
+        let chains = patches
+            .iter()
+            .filter(|(product, _, to)| {
+                !patches
+                    .iter()
+                    .any(|(other_product, from, _)| other_product == product && from == to)
+            })
+            .count();
+        full_downloads + chains
+    }
+
+    /// Whether there were updates and they're all finished
+    fn finished(&self, now: Instant) -> bool {
+        let Some(last_activity) = self.last_activity else {
+            return false;
+        };
+        if !self.downloads.is_empty() || self.self_update_pending {
+            return false;
+        }
+        // Toolbox installs the update of a running IDE once it's closed, so wait for that
+        let installs_started = self.installs_started as usize;
+        if !self.blocked.is_empty() && installs_started < self.expected_installs() {
+            return false;
+        }
+        let quiet = now.saturating_duration_since(last_activity);
+        let all_installed = installs_started >= self.expected_installs()
+            && self.installs_finished >= self.installs_started;
+        if all_installed {
+            quiet >= SETTLE_TIME
+        } else {
+            quiet >= QUIET_TIME
+        }
+    }
+
+    /// Whether a download has been going on for too long without any progress
+    fn stalled(&self, now: Instant) -> bool {
+        self.last_activity.is_some_and(|last_activity| {
+            !self.downloads.is_empty() && now.saturating_duration_since(last_activity) >= STALL_TIME
+        })
+    }
+}
+
+/// Splits a patch file name like `IU-261.1-261.2-patch-unix.jar` into `("IU", "261.1", "261.2")`
+fn parse_patch(file: &str) -> Option<(&str, &str, &str)> {
+    let (builds, _) = file.split_once("-patch-")?;
+    let (rest, to) = builds.rsplit_once('-')?;
+    let (product, from) = rest.rsplit_once('-')?;
+    Some((product, from, to))
+}
+
+fn parse_update_event(line: &str) -> Option<UpdateEvent> {
+    // The file name of a path or URL
+    fn file_name(s: &str) -> &str {
+        let s = s.split('?').next().unwrap_or(s);
+        s.rsplit('/').next().unwrap_or(s)
+    }
+    // The first word after `marker`
+    fn word_after<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
+        let (_, rest) = line.split_once(marker)?;
+        rest.split_whitespace().next()
+    }
+
+    if let Some(url) = word_after(line, "Downloading from ") {
+        let file = file_name(url);
+        // Toolbox also downloads icons, which don't get a checksum
+        let image = [".svg", ".png", ".jpg", ".jpeg", ".ico"]
+            .iter()
+            .any(|extension| file.ends_with(extension));
+        (!image).then(|| UpdateEvent::DownloadStarted(file.to_owned()))
+    } else if let Some(path) = word_after(line, "Correct checksum for ") {
+        // Downloads are saved as `{hash}-{file name}`
+        let saved_as = file_name(path);
+        let file = saved_as.split_once('-').map_or(saved_as, |(_, file)| file);
+        Some(UpdateEvent::DownloadVerified(file.to_owned()))
+    } else if line.contains(" atomically") && line.contains("Moved ") {
+        // `Moved {cache}/temp/{build}-{number} -> {install location} atomically`.
+        //  Other things are moved too (e.g. vmoptions files), but not from the temp folder.
+        let from = word_after(line, "Moved ")?;
+        let to = word_after(line, " -> ")?;
+        let from_temp = Path::new(from)
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|dir| dir == "temp");
+        from_temp.then(|| UpdateEvent::InstallStarted(file_name(to).to_owned()))
+    } else if line.contains("idea.log end contents") {
+        // Logged once per install, after its post-install step (updating plugins)
+        Some(UpdateEvent::InstallFinished)
+    } else if line.contains("Couldn't uninstall InstalledTool(") {
+        // `Couldn't uninstall InstalledTool(toolId=RustRover, toolName=RustRover, ...): Running`
+        let tool = word_after(line, "toolName=")?.trim_end_matches(',');
+        Some(UpdateEvent::InstallBlocked(tool.to_owned()))
+    } else if line.contains("Awaiting user action or background state to install.") {
+        Some(UpdateEvent::SelfUpdatePending)
+    } else if line.contains("with ToolPatch(") || line.contains(" args: update") {
+        Some(UpdateEvent::Progress)
+    } else {
+        None
+    }
+}
+
 /// Returns redo
 fn actual_update(
     installation: &JetBrainsToolboxInstallation,
@@ -358,8 +550,7 @@ fn actual_update(
     installation.start_minimized()?;
 
     // Monitor the logs for possible updates, and wait until they're complete
-    let mut updates: u32 = 0;
-    let mut correct_checksums_expected: u32 = 0;
+    let mut progress = UpdateProgress::default();
     let start_time = Instant::now();
     let mut startup_time = None;
 
@@ -379,10 +570,18 @@ fn actual_update(
 
         if let Some(startup_time) = startup_time
             // If 10 seconds pass from startup, we assume there are no updates
-            && updates == 0 && startup_time + Duration::from_secs(10) < Instant::now()
+            && progress.last_activity.is_none() && startup_time + Duration::from_secs(10) < Instant::now()
         {
             println!("No updates found");
             break;
+        }
+
+        if progress.finished(Instant::now()) {
+            println!("All updates finished");
+            break;
+        }
+        if progress.stalled(Instant::now()) {
+            return Err(UpdateError::UpdateTimeout);
         }
 
         let curr_position = file.stream_position()?;
@@ -397,43 +596,32 @@ fn actual_update(
             file.seek(SeekFrom::Start(curr_position))?;
             sleep(Duration::from_millis(100));
         } else {
-            // Each update consists of first downloading, then checking the checksum, then a lot of other things.
-            //  If the download is already there, it won't say "Downloading from", it will skip that
-            //  and immediately say "Correct checksum for".
-            //  This means that a "Correct checksum for" after there was a "Downloading from"
-            //  should not be considered as the start of a separate update.
-            //  We need to support this, because pre-downloaded updates are a real thing that can
-            //  happen, e.g. with self-updates.
-            if line.contains("Correct checksum for") || line.contains("Downloading from") {
-                if line.contains("Correct checksum for") && correct_checksums_expected > 0 {
-                    println!("Verified a checksum for an update that was started earlier");
-                    correct_checksums_expected -= 1;
-                    continue;
+            // Most update-related lines are handled by `progress`
+            if let Some(event) = progress.on_line(&line, Instant::now()) {
+                match event {
+                    UpdateEvent::DownloadStarted(file) => {
+                        println!("Found an update, downloading {file}")
+                    }
+                    UpdateEvent::DownloadVerified(file) => println!("Downloaded {file}"),
+                    UpdateEvent::PreDownloaded(file) => {
+                        println!("Found an update that was already downloaded: {file}")
+                    }
+                    UpdateEvent::InstallStarted(tool) => println!("Installing {tool}"),
+                    UpdateEvent::InstallBlocked(tool) => println!(
+                        "Warning: {tool} can't be updated while it's running. Waiting for you to close it"
+                    ),
+                    UpdateEvent::InstallFinished => {
+                        println!(
+                            "Finished installing an update, waiting for possible other updates"
+                        )
+                    }
+                    UpdateEvent::SelfUpdatePending => println!(
+                        "Toolbox self-update is ready. The self-update will apply automatically \
+                        in 60 seconds if you don't open Toolbox, but you can also click \
+                        'Restart Toolbox App to complete update' in the settings menu now."
+                    ),
+                    UpdateEvent::Progress => {}
                 }
-                // Update started
-                println!("Found an update, waiting until it finishes");
-                updates += 1;
-                if line.contains("Downloading from") {
-                    // We expect "Correct checksum for" to be broadcast exactly once after the "Downloading from".
-                    correct_checksums_expected += 1;
-                }
-            } else if line.contains("update-notification") {
-                // Update finished
-                updates -= 1;
-                if updates == 0 {
-                    println!("All updates finished, exiting in 30 seconds");
-                    // Letting it finish up the "Configuring" step
-                    sleep_unless_interrupted(Duration::from_secs(30), interrupted)?;
-                    break;
-                } else {
-                    println!("Update finished, waiting for other update(s) to finish");
-                }
-            } else if line.contains("Awaiting user action or background state to install.") {
-                println!(
-                    "Toolbox self-update is ready. The self-update will apply automatically \
-                    in 60 seconds if you don't open Toolbox, but you can also click \
-                    'Restart Toolbox App to complete update' in the settings menu now."
-                );
             } else if line.contains(
                 "Shutting down. Reason: The updated app is starting, closing the current process",
             ) {
@@ -643,6 +831,137 @@ mod tests {
         assert_eq!(auto_update(&installation, "invalid.json"), Some(false));
 
         fs::remove_dir_all(&installation.channels).unwrap();
+    }
+
+    /// Feeds a Toolbox log to a new `UpdateProgress`, using the log's own timestamps. Panics if it
+    ///  would've considered the updates finished before an update-related line.
+    fn replay(log: &str) -> UpdateProgress {
+        let start = Instant::now();
+        let mut progress = UpdateProgress::default();
+        for line in log.lines() {
+            // `{version} {pid} {date} {hours}:{minutes}:{seconds} ...`, all on one day
+            let time = line.split_whitespace().nth(3).unwrap();
+            let seconds = time
+                .split(':')
+                .map(|part| part.parse::<f64>().unwrap())
+                .fold(0.0, |total, part| total * 60.0 + part);
+            let now = start + Duration::from_secs_f64(seconds);
+            if parse_update_event(line).is_some() {
+                assert!(!progress.finished(now), "Finished before: {line}");
+            }
+            progress.on_line(line, now);
+        }
+        progress
+    }
+
+    /// Asserts that the updates are finished exactly `after` the last update-related line
+    fn assert_finishes_after(progress: &UpdateProgress, after: Duration) {
+        let last_activity = progress.last_activity.unwrap();
+        assert!(!progress.finished(last_activity + after - Duration::from_millis(1)));
+        assert!(progress.finished(last_activity + after));
+    }
+
+    #[test]
+    fn multi_patch_updates() {
+        // IDEA is updated with 3 patches, DataGrip is updated twice in a row (the second time with
+        //  2 patches), and WebStorm and RustRover are updated normally
+        let progress = replay(include_str!("../tests/logs/multi-patch.log"));
+        assert_eq!(progress.expected_installs(), 5);
+        assert_eq!(progress.installs_started, 5);
+        assert_finishes_after(&progress, SETTLE_TIME);
+    }
+
+    #[test]
+    fn already_downloaded_and_chained_updates() {
+        // GoLand and WebStorm were downloaded earlier, then WebStorm is updated again with 2 patches
+        let progress = replay(include_str!("../tests/logs/chained.log"));
+        assert_eq!(progress.expected_installs(), 3);
+        assert_eq!(progress.installs_started, 3);
+        assert_finishes_after(&progress, SETTLE_TIME);
+    }
+
+    #[test]
+    fn running_ide() {
+        // PyCharm and CLion can't be updated because they're running, until they're closed
+        let log = include_str!("../tests/logs/ide-running.log");
+        let closed = log
+            .find("\n3.8.1.88030 2655730 2026-10-17 20:40:14")
+            .unwrap()
+            + 1;
+        let progress = replay(&log[..closed]);
+        assert_eq!(progress.blocked, ["PyCharm", "CLion"]);
+        let an_hour = Duration::from_secs(60 * 60);
+        assert!(!progress.finished(progress.last_activity.unwrap() + an_hour));
+
+        let progress = replay(log);
+        assert_eq!(progress.installs_started, 5);
+        assert_finishes_after(&progress, SETTLE_TIME);
+    }
+
+    #[test]
+    fn major_update() {
+        // WebStorm 2025.3 gets a new configuration folder, so it skips the post-install step
+        let progress = replay(include_str!("../tests/logs/major-update.log"));
+        assert_eq!(progress.installs_started, 2);
+        assert_eq!(progress.installs_finished, 1);
+        assert_finishes_after(&progress, QUIET_TIME);
+    }
+
+    #[test]
+    fn self_update() {
+        // Never finished: Toolbox restarts itself, which actual_update handles
+        let progress = replay(include_str!("../tests/logs/self-update.log"));
+        assert!(progress.self_update_pending);
+        assert!(progress.verified.is_empty());
+        assert!(!progress.finished(progress.last_activity.unwrap() + STALL_TIME));
+    }
+
+    #[test]
+    fn stalled_download() {
+        let now = Instant::now();
+        let mut progress = UpdateProgress::default();
+        let line = "Downloading from https://download-cdn.jetbrains.com/toolbox/jetbrains-toolbox-3.4.0.77112.tar.gz (offset 0, Content-Range: null)";
+        progress.on_line(line, now);
+        // A resumed download is logged again, but it's still one download
+        let line = "Downloading from https://download-cdn.jetbrains.com/toolbox/jetbrains-toolbox-3.4.0.77112.tar.gz (offset 130284814, Content-Range: bytes 130284814-166483196/166483197)";
+        progress.on_line(line, now);
+        assert_eq!(progress.downloads.len(), 1);
+        assert!(!progress.stalled(now + STALL_TIME - Duration::from_millis(1)));
+        assert!(progress.stalled(now + STALL_TIME));
+        assert!(!progress.finished(now + STALL_TIME));
+    }
+
+    #[test]
+    fn ignored_lines() {
+        for line in [
+            "Downloading from https://downloads.marketplace.jetbrains.com/files/icons/toolbox/io.gitpod.flex/default.svg (offset 0, Content-Range: null)",
+            "Moved /home/user/.config/JetBrains/CLion2026.2/3e753f62-8779-45ff-a08c-f1e366b40afc -> /home/user/.config/JetBrains/CLion2026.2/clion64.vmoptions atomically",
+            "Moved /home/user/.cache/JetBrains/Toolbox/temp/toolbox-temp-2273730370990171170/3270436c-ff84-460d-955e-f396c08e9ad2 -> /home/user/.cache/JetBrains/Toolbox/temp/toolbox-temp-2273730370990171170/temp64.vmoptions atomically",
+            "Notifying `/home/user/.local/share/JetBrains/Toolbox/apps/clion` running at http://127.0.0.1:63343: update-notification, IntelliJApiNotification(...)",
+        ] {
+            assert_eq!(parse_update_event(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn patch_chains() {
+        assert_eq!(
+            parse_patch("IU-261.24374.151-261.25134.95-patch-unix.jar"),
+            Some(("IU", "261.24374.151", "261.25134.95"))
+        );
+        assert_eq!(parse_patch("idea-2025.3.6.1.tar.gz"), None);
+        let progress = UpdateProgress {
+            verified: [
+                "IU-1.1-1.2-patch-unix.jar",
+                "IU-1.2-1.3-patch-unix.jar",
+                "WS-1.2-1.3-patch-unix.jar",
+                "datagrip-2026.2.4.tar.gz",
+            ]
+            .map(String::from)
+            .to_vec(),
+            ..Default::default()
+        };
+        assert_eq!(progress.expected_installs(), 3);
     }
 
     #[test]
