@@ -58,7 +58,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     needs: [ native_build ]
     env:
       tag: ${{ github.event.client_payload.tag }}
